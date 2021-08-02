@@ -1,0 +1,16 @@
+#!/bin/bash
+
+file="junk"
+file2="junk2"
+
+if [ -f "$file" ] ; then
+    rm "$file"
+fi
+
+if [ -f "$file2" ] ; then
+    rm "$file2"
+fi
+
+echo
+echo Removed Files
+echo

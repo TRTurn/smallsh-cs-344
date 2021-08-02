@@ -19,25 +19,74 @@
 #include <stdbool.h> // bool
 #include <signal.h> // sig
 
-#define CMDMAX 2048 // max command length
-#define ARGMAX 512 // max arguments
-#define DELIM " \n" // delimitor(s)
-#define VAREXP "$$" // variable to expand
-int fgpid = 0; // currently runngin foreground child process
-int lastStat = 0; // last exit status // default 0
-bool background = true; // background available
-
-//-- ---Linked List
+// Constants
+#define MAXLENCMD 2048 
+#define MAXARGS 512 
+#define DELIM " \n"
+#define EXPANDVAR "$$"
 
 /* struct to hold & processes */
-
 typedef struct node{ // linked list background process struct
   int pid; 
   struct node *next;
 }node;
 
+// Linked List
+void push_node(node **head, int new_pid);
+void remove_node(struct node **head, int pid);
+void check_node(struct node *head);
+void kill_node(struct node *head);
+
+// Handlers
+void handle_SIGINT(int sig);
+void handle_SIGSTP(int sig);
+
+// Required Functions
+int cmd_status(char **args);
+int cmd_cd(char **args);
+int cmd_exit(char **args);
+
+//
+int num_funcs();
+int std_exe(char **args, bool bg);
+char *expand(char *arg);
+int builtInExe(char **args);
+char **split_line(char *line);
+char *read_line();
+void shell();
+
+
+int fgpid = 0; // currently runngin foreground child process
+int lastStat = 0; // last exit status // default 0
+bool background = true; // background available
+
 struct node *child = NULL; // global linked list
 
+/* array of built in functions, parallel to name array */
+int (*funcArray[])(char **) = {
+  &cmd_exit,
+  &cmd_cd,
+  &cmd_status
+};
+
+/* string array of built in function names */
+char *funcNames[] = {
+  "exit",
+  "cd",
+  "status",
+};
+
+// Main
+int main(int argc, char **argv){
+  shell();
+
+  free(child);
+
+  return 0;
+}
+
+
+//-Linked List
 /* adds new child to end of linked list */
 void push_node(node **head, int new_pid){ 
   if(new_pid != -1){
@@ -70,8 +119,9 @@ void remove_node(struct node **head, int pid){
   free(temp);
 } 
 
-/* removes exited child from linked list */
-void checkCHILD(struct node *head){ 
+// TODO:
+/* Checks removed node exit status */
+void check_node(struct node *head){ 
   if(head == NULL){
     return;
   }
@@ -91,8 +141,8 @@ void checkCHILD(struct node *head){
   return;
 } 
 
-/* removes exited child from linked list */
-void kill_child_node(struct node *head){ 
+/* Kills node */
+void kill_node(struct node *head){ 
   if(head == NULL){
     return;
   }
@@ -143,33 +193,17 @@ int cmd_cd(char **args){
   return 1;
 }
 
-// exit
 /* ends shell */
 int cmd_exit(char **args){
-  kill_child_node(child);
+  kill_node(child);
   kill(fgpid, SIGKILL);
 
   return 0;
 }
 
-/* array of built in functions, parallel to name array */
-int (*funcArray[])(char **) = {
-  &cmd_exit,
-  &cmd_cd,
-  &cmd_status
-};
-
-
-/* string array of built in function names */
-char *funcNames[] = {
-  "exit",
-  "cd",
-  "status",
-};
-
 // size of function array
 /* returns number of functions in function array */
-int builtSize(){
+int num_funcs(){
   return sizeof(funcNames) / sizeof(char *);
 }
 
@@ -250,14 +284,13 @@ int std_exe(char **args, bool bg){
   return 1;
 }
 
-// varExpand
-/* replaces $$ with pid */
-char *varExpand(char *arg){
+/* replaces EXPANDVAR with pid */
+char *expand(char *arg){
   pid_t num = getpid(); // get pid in int form
     int pidLen = snprintf(NULL, 0, "%d", num); // get str pid length
     char *pid = malloc(pidLen+1); // make str for pid
     snprintf(pid, pidLen+1, "%d", num); // pid_t -> str
-  char var[] = VAREXP;
+  char var[] = EXPANDVAR;
   char *result; 
   int i;
   int count = 0; 
@@ -290,14 +323,16 @@ char *varExpand(char *arg){
 // builtInExe
 /* executed built in commands */
 int builtInExe(char **args){
-  if(args[0] == NULL || strchr(args[0], '#') != NULL) { // ignore empty or comment
+
+  // Check empty or comment
+  if(args[0] == NULL || strchr(args[0], '#') != NULL) {
     return 1;
   }
 
   int i = 0;
-  while(args[i] != NULL){ // check if args has $$
-    if(strstr(args[i], VAREXP)){ // if so, replace
-      args[i] = varExpand(args[i]);
+  while(args[i] != NULL){ // check if args has EXPANDVAR
+    if(strstr(args[i], EXPANDVAR)){ 
+      args[i] = expand(args[i]);
     }
     i++;
   }
@@ -313,7 +348,7 @@ int builtInExe(char **args){
     bg = false;
   }
 
-  for(i = 0; i < builtSize(); ++i){ // check if args[i] is built in
+  for(i = 0; i < num_funcs(); ++i){ // check if args[i] is built in
     if (strcmp(args[0], funcNames[i]) == 0){
       return (*funcArray[i])(args);
     }
@@ -322,10 +357,9 @@ int builtInExe(char **args){
   return std_exe(args, bg); // else args[i] is not built in
 }
 
-// splitLine
 /* parses inputed command into array of pointers */
-char **splitLine(char *line){
-  int buff = ARGMAX;
+char **split_line(char *line){
+  int buff = MAXARGS;
   int position = 0;
   char **tokens = malloc(buff * sizeof(char*));
   char *token, **tokens_backup;
@@ -341,11 +375,10 @@ char **splitLine(char *line){
   return tokens;
 }
 
-// readLine
 /* reads in stdin command */
-char *readLine(){
+char *read_line(){
   char *line = NULL;
-  size_t buff = CMDMAX;
+  size_t buff = MAXLENCMD;
 
   signal(SIGINT, handle_SIGINT);
   signal(SIGTSTP, handle_SIGSTP); 
@@ -364,22 +397,22 @@ void shell(){
   int run;
 
   do{
-    checkCHILD(child); // check if background processes have exited
+    check_node(child); // check if background processes have exited
 
-    line = readLine(); // get new cmd
-    args = splitLine(line); // parse cmd
+    line = read_line(); // get new cmd
+    args = split_line(line); // parse cmd
     run = builtInExe(args); // execute cmd
 
     free(line);
     free(args);
-  }while(run); // while 1 continue, 0 exit
+  } while(run);
 }
 
-// Main
-int main(int argc, char **argv){
-  shell();
 
-  free(child);
-
-  return 0;
-}
+/* Sources
+ * C Programming Book
+ * OSU Tutor
+ *
+ *
+ * 
+*/

@@ -27,34 +27,30 @@ int fgpid = 0; // currently runngin foreground child process
 int lastStat = 0; // last exit status // default 0
 bool background = true; // background available
 
-//------------------------------------------------------------Linked List
-//______________________________________________struct child
-/* struct to hold & processes
- */
-typedef struct child{ // linked list bagckground process struct
+//-- ---Linked List
+
+/* struct to hold & processes */
+
+typedef struct node{ // linked list background process struct
   int pid; 
-  struct child *next;
-}child;
+  struct node *next;
+}node;
 
-child *chld = NULL; // global linked list
+struct node *child = NULL; // global linked list
 
-//______________________________________________pushCHLD
-/* adds new child to end of linked list
- */
-void pushCHLD(child **head, int new_pid){ 
+/* adds new child to end of linked list */
+void push_node(node **head, int new_pid){ 
   if(new_pid != -1){
-    struct child* new_child = (struct child*) malloc(sizeof(struct child)); 
+    struct node* new_child = (struct node*) malloc(sizeof(struct node)); 
     new_child->pid = new_pid; 
     new_child->next = *head; 
     *head = new_child; 
   }
 } 
 
-//______________________________________________removeCHLD
-/* removes exited child from linked list
- */
-void removeCHLD(struct child **head, int pid){ 
-  struct child* temp = *head, *prev; 
+/* removes exited child from linked list */
+void remove_node(struct node **head, int pid){ 
+  struct node* temp = *head, *prev; 
   if (temp != NULL && temp->pid == pid){ 
     *head = temp->next;
     free(temp);
@@ -74,10 +70,8 @@ void removeCHLD(struct child **head, int pid){
   free(temp);
 } 
 
-//______________________________________________checkCHLD
-/* removes exited child from linked list
- */
-void checkCHLD(struct child *head){ 
+/* removes exited child from linked list */
+void checkCHILD(struct node *head){ 
   if(head == NULL){
     return;
   }
@@ -88,7 +82,7 @@ void checkCHLD(struct child *head){
     pid = waitpid(head->pid, &status, WNOHANG);
     if(pid == head->pid){
       fprintf(stdout, "%d Exited | Status %d\n", head->pid, WEXITSTATUS(status));
-      removeCHLD(&chld, head->pid);
+      remove_node(&child, head->pid);
     }
     head = head->next; 
   } 
@@ -97,10 +91,8 @@ void checkCHLD(struct child *head){
   return;
 } 
 
-//______________________________________________killCHLD
-/* removes exited child from linked list
- */
-void killCHLD(struct child *head){ 
+/* removes exited child from linked list */
+void kill_child_node(struct node *head){ 
   if(head == NULL){
     return;
   }
@@ -113,18 +105,14 @@ void killCHLD(struct child *head){
   return;
 } 
 
-//---------------------------------------------------------------Handlers
-//______________________________________________handle_INT
-/* handles SIGINT signals
- */
-void handle_INT(int sig){
+//-- Handlers
+/* handles SIGINT signals */
+void handle_SIGINT(int sig){
   kill(fgpid, SIGINT);
 }
 
-//______________________________________________handle_TSTP
-/* handles SIGTSTP signals
- */
-void handle_TSTP(int sig){
+/* handles SIGTSTP signals */
+void handle_SIGSTP(int sig){
   if(background == true){
     background = false;
   }
@@ -133,10 +121,8 @@ void handle_TSTP(int sig){
   }
 }
 
-//---------------------------------------------------------------Built In
-//______________________________________________status
-/* displays contents of name array
- */
+//-- Built In
+/* displays contents of name array */
 int cmd_status(char **args){
   fprintf(stdout, "%d\n", lastStat);
   fflush(stdout);
@@ -144,75 +130,62 @@ int cmd_status(char **args){
   return 1;
 }
 
-//______________________________________________cd
-/* cd command
- */
+/* Change Directory (cd) */
 int cmd_cd(char **args){
   if (args[1] == NULL){
     chdir(getenv("HOME"));
   } 
-  else{
-    if (chdir(args[1]) != 0){
+  else if (chdir(args[1]) != 0){
       perror("error changing to directory");
       fflush(stdout);
       exit(1);
     }
-  }
-
   return 1;
 }
 
-//______________________________________________exit
-/* ends shell
- */
+// exit
+/* ends shell */
 int cmd_exit(char **args){
-  killCHLD(chld);
+  kill_child_node(child);
   kill(fgpid, SIGKILL);
 
   return 0;
 }
 
-//______________________________________________builtFunctions[]
-/* array of built in functions, parallel to name array
- */
-int (*builtFunctions[])(char **) = {
+/* array of built in functions, parallel to name array */
+int (*funcArray[])(char **) = {
   &cmd_exit,
   &cmd_cd,
   &cmd_status
 };
 
-//______________________________________________builtNames[]
-/* string array of built in function names
- */
-char *builtNames[] = {
+
+/* string array of built in function names */
+char *funcNames[] = {
   "exit",
   "cd",
   "status",
 };
 
-//______________________________________________size of function array
-/* returns number of functions in function array
- */
+// size of function array
+/* returns number of functions in function array */
 int builtSize(){
-  return sizeof(builtNames) / sizeof(char *);
+  return sizeof(funcNames) / sizeof(char *);
 }
 
-//---------------------------------------------------------Main Functions
-//______________________________________________nativeExe
-/* executes non-built in functions
- */
-int nativeExe(char **args, bool bg){
+//-- Main Functions
+/* executes standard functions */
+int std_exe(char **args, bool bg){
   pid_t pid;
   int i = 0;
   int targetin = 0;
   int targetout = 0;
   int status;
 
-  //signal(SIGCHLD, handle_CHLD);
 	pid = fork();
   
 	switch (pid){
-		case -1: //error
+		case -1: // error
 			perror("fork() failed");
       fflush(stdout);
 			exit(1);
@@ -247,18 +220,20 @@ int nativeExe(char **args, bool bg){
           dup2(targetout, 1);
         }
       }
+
       if(execvp(args[0], args) == -1){
         perror("sh");
         fflush(stdout);
         exit(1);
       }
+      
       fflush(stdout);
       break;
 
 		default: // parent
       if(bg == true){ // background mode
         fprintf(stdout, "%d Started\n", pid);
-        pushCHLD(&chld, pid);
+        push_node(&child, pid);
       }
       else{ // foreground mode
         fgpid = pid;
@@ -275,9 +250,8 @@ int nativeExe(char **args, bool bg){
   return 1;
 }
 
-//______________________________________________varExpand
-/* replaces $$ with pid
- */
+// varExpand
+/* replaces $$ with pid */
 char *varExpand(char *arg){
   pid_t num = getpid(); // get pid in int form
     int pidLen = snprintf(NULL, 0, "%d", num); // get str pid length
@@ -313,9 +287,8 @@ char *varExpand(char *arg){
   return result; // needs free()
 }
 
-//______________________________________________builtInExe
-/* executed built in commands
- */
+// builtInExe
+/* executed built in commands */
 int builtInExe(char **args){
   if(args[0] == NULL || strchr(args[0], '#') != NULL) { // ignore empty or comment
     return 1;
@@ -341,17 +314,16 @@ int builtInExe(char **args){
   }
 
   for(i = 0; i < builtSize(); ++i){ // check if args[i] is built in
-    if (strcmp(args[0], builtNames[i]) == 0){
-      return (*builtFunctions[i])(args);
+    if (strcmp(args[0], funcNames[i]) == 0){
+      return (*funcArray[i])(args);
     }
   }
 
-  return nativeExe(args, bg); // else args[i] is not built in
+  return std_exe(args, bg); // else args[i] is not built in
 }
 
-//______________________________________________splitLine
-/* parses inputed command into array of pointers
- */
+// splitLine
+/* parses inputed command into array of pointers */
 char **splitLine(char *line){
   int buff = ARGMAX;
   int position = 0;
@@ -369,15 +341,14 @@ char **splitLine(char *line){
   return tokens;
 }
 
-//______________________________________________readLine
-/* reads in stdin command
- */
+// readLine
+/* reads in stdin command */
 char *readLine(){
   char *line = NULL;
   size_t buff = CMDMAX;
 
-  signal(SIGINT, handle_INT);
-  signal(SIGTSTP, handle_TSTP); 
+  signal(SIGINT, handle_SIGINT);
+  signal(SIGTSTP, handle_SIGSTP); 
 
   printf(": ");
   getline(&line, &buff, stdin);
@@ -385,16 +356,15 @@ char *readLine(){
   return line;
 }
 
-//______________________________________________shell
-/* main shell interface, read, parse, execute
- */
+// shell
+/* main shell interface, read, parse, execute */
 void shell(){
   char *line;
   char **args;
   int run;
 
   do{
-    checkCHLD(chld); // check if background processes have exited
+    checkCHILD(child); // check if background processes have exited
 
     line = readLine(); // get new cmd
     args = splitLine(line); // parse cmd
@@ -405,11 +375,11 @@ void shell(){
   }while(run); // while 1 continue, 0 exit
 }
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++Main
+// Main
 int main(int argc, char **argv){
   shell();
 
-  free(chld);
+  free(child);
 
   return 0;
 }

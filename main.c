@@ -1,29 +1,24 @@
 /*
  * Assignment 3: smallsh
- * - Command Prompt.
- * - Comments & Blank Lines
- * - Expansion of Variables $$
- * - Built-in Commands
- * - Executing Other Commands
- * - Input & Output Redirection
- * - Executing Commands in Foreground & Background
- * - Signals SIGINT & SIGTSTP
- */
+ * Author: Tim Turnbaugh
+ * Class: OSU CS 344: Operating Systems
+*/
  
-#include <stdio.h> // main
-#include <stdlib.h> // main malloc
-#include <string.h> // string
-#include <unistd.h> // fork // exec
-#include <sys/wait.h> // waitpid
-#include <fcntl.h> // O_RDONLY
-#include <stdbool.h> // bool
-#include <signal.h> // sig
+#include <stdio.h>
+#include <stdlib.h> 
+#include <string.h>
+#include <unistd.h> 
+#include <sys/wait.h> 
+#include <fcntl.h>
+#include <stdbool.h> 
+#include <signal.h> 
 
 // Constants
-#define MAXLENCMD 2048 
-#define MAXARGS 512 
-#define DELIM " \n"
+
 #define EXPANDVAR "$$"
+#define DELIM " \n"
+#define MAXLEN 2048
+#define MAXARGS 512 
 
 /* struct to hold & processes */
 typedef struct node{ // linked list background process struct
@@ -31,44 +26,40 @@ typedef struct node{ // linked list background process struct
   struct node *next;
 }node;
 
-// Linked List
+// Linked List Functions
 void push_node(node **head, int new_pid);
 void remove_node(struct node **head, int pid);
 void check_node(struct node *head);
 void kill_node(struct node *head);
-
-// Handlers
-void handle_SIGINT(int sig);
-void handle_SIGSTP(int sig);
 
 // Required Functions
 int cmd_status(char **args);
 int cmd_cd(char **args);
 int cmd_exit(char **args);
 
-//
+// Helper Functions
 int num_funcs();
 int std_exe(char **args, bool bg);
 char *expand(char *arg);
-int builtInExe(char **args);
-char **split_line(char *line);
-char *read_line();
+
+// Input Handling
+char *read_in();
+char **parse_in(char *line);
+int func_exe(char **args);
 void shell();
 
+// Signal Handlers
+void handle_SIGINT(int sig);
+void handle_SIGSTP(int sig);
 
-int fgpid = 0; // currently runngin foreground child process
-int lastStat = 0; // last exit status // default 0
-bool background = true; // background available
 
-struct node *child = NULL; // global linked list
-
+// Initialize Globals
 /* array of built in functions, parallel to name array */
 int (*funcArray[])(char **) = {
   &cmd_exit,
   &cmd_cd,
   &cmd_status
 };
-
 /* string array of built in function names */
 char *funcNames[] = {
   "exit",
@@ -76,7 +67,11 @@ char *funcNames[] = {
   "status",
 };
 
-// Main
+int fgpid = 0; 
+int last_exit = 0;
+bool background = true; 
+struct node *child = NULL;
+
 int main(int argc, char **argv){
   shell();
 
@@ -174,7 +169,7 @@ void handle_SIGSTP(int sig){
 //-- Built In
 /* displays contents of name array */
 int cmd_status(char **args){
-  fprintf(stdout, "%d\n", lastStat);
+  fprintf(stdout, "%d\n", last_exit);
   fflush(stdout);
 
   return 1;
@@ -276,7 +271,7 @@ int std_exe(char **args, bool bg){
           fprintf(stdout, "\n Signal %d recived\n", WTERMSIG(status));
         }
       }
-      lastStat = WEXITSTATUS(status); // save last process exit status
+      last_exit = WEXITSTATUS(status); // save last process exit status
 			break;
 	}
   fflush(stdout);
@@ -320,9 +315,40 @@ char *expand(char *arg){
   return result; // needs free()
 }
 
-// builtInExe
-/* executed built in commands */
-int builtInExe(char **args){
+/* reads in stdin command */
+char *read_in(){
+  char *line = NULL;
+  size_t buff = MAXLEN;
+
+  signal(SIGINT, handle_SIGINT);
+  signal(SIGTSTP, handle_SIGSTP); 
+
+  printf(": ");
+  getline(&line, &buff, stdin);
+
+  return line;
+}
+
+/* parses inputed command into array of pointers */
+char **parse_in(char *line){
+  int buff = MAXARGS;
+  int position = 0;
+  char **tokens = malloc(buff * sizeof(char*));
+  char *token, **tokens_backup;
+
+  token = strtok(line, DELIM);
+  while (token != NULL) {
+    tokens[position] = token;
+    position++;
+    token = strtok(NULL, DELIM);
+  }
+  tokens[position] = NULL;
+
+  return tokens;
+}
+
+/* execute built in commands */
+int func_exe(char **args){
 
   // Check empty or comment
   if(args[0] == NULL || strchr(args[0], '#') != NULL) {
@@ -357,39 +383,6 @@ int builtInExe(char **args){
   return std_exe(args, bg); // else args[i] is not built in
 }
 
-/* parses inputed command into array of pointers */
-char **split_line(char *line){
-  int buff = MAXARGS;
-  int position = 0;
-  char **tokens = malloc(buff * sizeof(char*));
-  char *token, **tokens_backup;
-
-  token = strtok(line, DELIM);
-  while (token != NULL) {
-    tokens[position] = token;
-    position++;
-    token = strtok(NULL, DELIM);
-  }
-  tokens[position] = NULL;
-
-  return tokens;
-}
-
-/* reads in stdin command */
-char *read_line(){
-  char *line = NULL;
-  size_t buff = MAXLENCMD;
-
-  signal(SIGINT, handle_SIGINT);
-  signal(SIGTSTP, handle_SIGSTP); 
-
-  printf(": ");
-  getline(&line, &buff, stdin);
-
-  return line;
-}
-
-// shell
 /* main shell interface, read, parse, execute */
 void shell(){
   char *line;
@@ -399,12 +392,13 @@ void shell(){
   do{
     check_node(child); // check if background processes have exited
 
-    line = read_line(); // get new cmd
-    args = split_line(line); // parse cmd
-    run = builtInExe(args); // execute cmd
+    line = read_in(); // get input
+    args = parse_in(line); // parse input
+    run = func_exe(args); // execute cmds from input
 
     free(line);
     free(args);
+
   } while(run);
 }
 

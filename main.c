@@ -14,7 +14,6 @@
 #include <signal.h> 
 
 // Constants
-
 #define EXPANDVAR "$$"
 #define DELIM " \n"
 #define MAXLEN 2048
@@ -61,7 +60,7 @@ int (*funcArray[])(char **) = {
   &cmd_status
 };
 /* string array of built in function names */
-char *funcNames[] = {
+char *func_names[] = {
   "exit",
   "cd",
   "status",
@@ -199,7 +198,7 @@ int cmd_exit(char **args){
 // size of function array
 /* returns number of functions in function array */
 int num_funcs(){
-  return sizeof(funcNames) / sizeof(char *);
+  return sizeof(func_names) / sizeof(char *);
 }
 
 //-- Main Functions
@@ -207,46 +206,47 @@ int num_funcs(){
 int std_exe(char **args, bool bg){
   pid_t pid;
   int i = 0;
-  int targetin = 0;
-  int targetout = 0;
+  int target_in = 0;
+  int target_out = 0;
   int status;
 
 	pid = fork();
   
 	switch (pid){
-		case -1: // error
-			perror("fork() failed");
+		case -1: 
+			perror("Failed");
       fflush(stdout);
 			exit(1);
 			break;
 
-		case 0: // child
-      while(args[i] != NULL){ // find redirect
-        if(strcmp(args[i], "<") == 0){ // input
-          args[i] = NULL; // remove < arg
-          i++; // increment to filename
-          targetin = open(args[i], O_RDONLY);
+		case 0: 
+      while(args[i] != NULL){ 
+        if(strcmp(args[i], "<") == 0){ 
+          args[i] = NULL; 
+          i++;
+          target_in = open(args[i], O_RDONLY);
           args[i] = NULL;
-          dup2(targetin, 0);
+          dup2(target_in, 0);
         }
-        else if(strcmp(args[i], ">") == 0){ // output
-          args[i] = NULL; // remove > arg
-          i++; // increment to filename
-          targetout = open(args[i], O_WRONLY | O_CREAT | O_TRUNC, 0640);
-          args[i] = NULL; // remove file arg
-          dup2(targetout, 1);
+        else if(strcmp(args[i], ">") == 0){ 
+          args[i] = NULL;
+          i++; 
+          target_out = open(args[i], O_WRONLY | O_CREAT | O_TRUNC, 0640);
+          args[i] = NULL; 
+          dup2(target_out, 1);
         }
         i++;
       }
       
+      // TODO: Dev/Null?
       if(bg == true){ // background
-        if(targetin == 0){ // no input
-          targetin = open("/dev/null", O_RDONLY);
-          dup2(targetin, 0);
+        if(target_in == 0){ // no input
+          target_in = open("/dev/null", O_RDONLY);
+          dup2(target_in, 0);
         }
-        if(targetout == 0){ // no output
-          targetout = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0640);
-          dup2(targetout, 1);
+        if(target_out == 0){ // no output
+          target_out = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0640);
+          dup2(target_out, 1);
         }
       }
 
@@ -356,14 +356,14 @@ int func_exe(char **args){
   }
 
   int i = 0;
-  while(args[i] != NULL){ // check if args has EXPANDVAR
-    if(strstr(args[i], EXPANDVAR)){ 
+  while(args[i] != NULL){ 
+    if(strstr(args[i], EXPANDVAR)){ // check if args has EXPANDVAR
       args[i] = expand(args[i]);
     }
     i++;
   }
 
-  bool bg = false; // background true/false
+  bool bg = false; 
   i--; // bring back to last arg
   if(strcmp(args[i], "&") == 0){ // last is &
     args[i] = NULL;
@@ -375,7 +375,7 @@ int func_exe(char **args){
   }
 
   for(i = 0; i < num_funcs(); ++i){ // check if args[i] is built in
-    if (strcmp(args[0], funcNames[i]) == 0){
+    if (strcmp(args[0], func_names[i]) == 0){
       return (*funcArray[i])(args);
     }
   }
@@ -391,7 +391,6 @@ void shell(){
 
   do{
     check_node(child); // check if background processes have exited
-
     line = read_in(); // get input
     args = parse_in(line); // parse input
     run = func_exe(args); // execute cmds from input
@@ -406,7 +405,7 @@ void shell(){
 /* Sources
  * C Programming Book
  * OSU Tutor
- *
+ * /dev/null https://linuxhint.com/what_is_dev_null/
  *
  * 
 */

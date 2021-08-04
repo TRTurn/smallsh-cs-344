@@ -4,21 +4,22 @@
  * Class: OSU CS 344: Operating Systems
 */
  
-#include <stdio.h>
-#include <stdlib.h> 
-#include <string.h>
-#include <unistd.h> 
-#include <sys/wait.h> 
-#include <sys/types.h>
 #include <fcntl.h>
 #include <stdbool.h> 
 #include <signal.h> 
+#include <stdio.h>
+#include <stdlib.h> 
+#include <string.h>
+#include <sys/wait.h> 
+#include <sys/types.h>
+#include <unistd.h> 
+
 
 // Constants
-#define EXPANDVAR "$$"
+#define EXPANSIONVAR "$$"
 #define DELIM " \n"
-#define MAXBUFF 2048
-#define MAXARGS 512 
+#define MAXBUFF 2048 // Per guidelines
+#define MAXARGS 512 // Per guidelines
 
 /* struct to hold & processes */
 typedef struct node{ // linked list background process struct
@@ -30,7 +31,7 @@ typedef struct node{ // linked list background process struct
 void push_node(struct node**, int);
 void remove_node(struct node**, int);
 void check_node(struct node*);
-void kill_node(struct node*);
+void kill_list(struct node*);
 
 // Required Functions
 int cmd_status(char** );
@@ -120,7 +121,7 @@ char **parse_in(char *input){
   int buff = MAXARGS;
   int position = 0;
   char **_args = malloc(buff * sizeof(char*));
-  char *_arg, **args_backup;
+  char *_arg;
 
   // TODO:
   // Breaking up the input into a series of arguments
@@ -147,7 +148,7 @@ int func_exe(char **args){
   int i = 0;
   while(args[i] != NULL){ 
     // Check for expansion variable 
-    if(strstr(args[i], EXPANDVAR)){ 
+    if(strstr(args[i], EXPANSIONVAR)){ 
       args[i] = expand(args[i]);
     }
     i++;
@@ -173,14 +174,10 @@ int func_exe(char **args){
   return std_exe(args, bg); // else args[i] is not built in
 }
 
-
-//-- Handlers
-/* handles SIGINT signals */
 void handle_SIGINT(int signum){
   kill(fgpid, SIGINT);
 }
 
-/* handles SIGTSTP signals */
 void handle_SIGSTP(int signum){
   if(background == true){
     background = false;
@@ -225,72 +222,76 @@ void push_node(struct node **head, int new_pid){
   return;
 } 
 
-/* removes exited child from linked list */
+/* removes a specified node from linked list. The list is then adjusted accordingly for the surrounding nodes. */
 void remove_node(struct node **head, int pid){ 
-  struct node* temp = *head, *prev; 
-  if (temp != NULL && temp->pid == pid){ 
-    *head = temp->next;
-    free(temp);
+  struct node* current = *head, *prev;
+
+  // If head is target node 
+  if (current != NULL && current->pid == pid){ 
+    *head = current->next;
+    free(current);
     return; 
   } 
 
-  while(temp != NULL && temp->pid != pid){ 
-    prev = temp; 
-    temp = temp->next; 
+  // Keep progressing through linked list
+  while(current != NULL && current->pid != pid){ 
+    prev = current; 
+    current = current->next; 
   } 
 
-  if(temp == NULL){
+  // End of list check
+  if(current == NULL){
     return; 
   }
 
-  prev->next = temp->next; 
-  free(temp);
+  // Removal of node
+  prev->next = current->next; 
+  free(current);
 } 
 
 
 /* Kills node */
-void kill_node(struct node *head){ 
-  if(head == NULL){
+void kill_list(struct node *current_node){ 
+  // Check if empty linked list
+  if(current_node == NULL){
     return;
   }
 
-  while(head != NULL){ 
-    kill(head->pid, SIGKILL);
-    head = head->next;
+  // Kill current node and its children
+  while(current_node != NULL){ 
+    kill(current_node->pid, SIGKILL);
+    current_node = current_node->next;
   } 
 
   return;
 } 
 
-
-//-- Built In
 /* displays contents of name array */
 int cmd_status(char **args){
   fprintf(stdout, "%d\n", last_exit);
   fflush(stdout);
-
-  return 1;
+  return 1; // Don't close smallsh
 }
 
 /* Change Directory (cd) */
 int cmd_cd(char **args){
   if (args[1] == NULL){
-    chdir(getenv("HOME"));
+    chdir(getenv("HOME")); // Home is default subdirectory of root in linux
   } 
   else if (chdir(args[1]) != 0){
       perror("error changing to directory");
       fflush(stdout);
       exit(1);
     }
-  return 1;
+  return 1; // Don't close smallsh
 }
 
 /* ends shell */
 int cmd_exit(char **args){
-  kill_node(child);
+  kill_list(child);
   kill(fgpid, SIGKILL);
 
-  return 0;
+  return 0; // Close smallsh
 }
 
 // size of function array
@@ -299,73 +300,76 @@ int num_funcs(){
   return sizeof(func_names) / sizeof(char *);
 }
 
-//-- Main Functions
-/* executes standard functions */
+/* executes normal/standard functions */
 int std_exe(char **args, bool bg){
-  pid_t pid;
+  pid_t spawnpid;
   int i = 0;
   int target_in = 0;
   int target_out = 0;
   int status;
 
-	pid = fork();
-  
-	switch (pid){
+	spawnpid = fork(); // Per class exploration 
+	switch (spawnpid){
 		case -1: 
-			perror("Failed");
+      // Executed by parent when fork fails and creation of child also fails
+			perror("fork() Failed");
       fflush(stdout);
 			exit(1);
 			break;
 
 		case 0: 
+      // Child executes this branch
+      // TODO
       while(args[i] != NULL){ 
+        // Checks if current arg is angle brackets if so copies contents accordingly
         if(strcmp(args[i], "<") == 0){ 
           args[i] = NULL; 
-          i++;
-          target_in = open(args[i], O_RDONLY);
+          target_in = open(args[++i], O_RDONLY);
           args[i] = NULL;
           dup2(target_in, 0);
         }
         else if(strcmp(args[i], ">") == 0){ 
           args[i] = NULL;
-          i++; 
-          target_out = open(args[i], O_WRONLY | O_CREAT | O_TRUNC, 0640);
+          target_out = open(args[++i], O_WRONLY | O_CREAT | O_TRUNC, 0640);
           args[i] = NULL; 
           dup2(target_out, 1);
         }
+
+        // Next arg
         i++;
       }
       
-      // TODO: Dev/Null?
-      if(bg == true){ // background
-        if(target_in == 0){ // no input
+      // TODO: dup2
+      if(bg == true){ 
+        if(target_in == 0){ 
           target_in = open("/dev/null", O_RDONLY);
           dup2(target_in, 0);
         }
-        if(target_out == 0){ // no output
+        if(target_out == 0){ 
           target_out = open("/dev/null", O_WRONLY | O_CREAT | O_TRUNC, 0640);
           dup2(target_out, 1);
         }
       }
 
-      if(execvp(args[0], args) == -1){
-        perror("sh");
+      if(execvp(args[0], args) == -1){ // Exec funcs only return if error occurs "Error Check"
+        perror("Exec Error");
         fflush(stdout);
         exit(1);
       }
       
+      // Print and clear
       fflush(stdout);
       break;
 
-		default: // parent
+		default:
+      // Parent executes this branch because spawnpid == pid of child
       if(bg == true){ // background mode
-      //Todo fix extracolon in pid
-        fprintf(stdout, "%d Started\n", pid);
-        push_node(&child, pid);
+        fprintf(stdout, "%d Started\n", spawnpid);
+        push_node(&child, spawnpid); // Add child node to linked list
       }
       else{ // foreground mode
-        fgpid = pid;
-        waitpid(pid, &status, 0);
+        fgpid = spawnpid;
+        waitpid(spawnpid, &status, 0);
         if(WIFSIGNALED(status)){
           fprintf(stdout, "\n Signal %d recived\n", WTERMSIG(status));
         }
@@ -378,16 +382,18 @@ int std_exe(char **args, bool bg){
   return 1;
 }
 
-/* replaces EXPANDVAR with pid */
+/* substitutes EXPANSIONVAR with pid */
 char *expand(char *arg){
-  pid_t num = getpid(); // get pid in int form
+  pid_t num = getpid(); 
     int pidLen = snprintf(NULL, 0, "%d", num); // get str pid length
     char *pid = malloc(pidLen+1); // make str for pid
     snprintf(pid, pidLen+1, "%d", num); // pid_t -> str
-  char var[] = EXPANDVAR;
+  char var[] = EXPANSIONVAR;
   char *result; 
   int i;
   int count = 0; 
+
+  // TODO
   int varLen = strlen(var); 
 
   for (i = 0; arg[i] != '\0'; ++i){ // count how many times $$ shows up
@@ -397,7 +403,8 @@ char *expand(char *arg){
     } 
   } 
 
-  result = (char*)malloc(i + count * (pidLen - varLen) + 1); // new string
+  // TODO:
+  result = (char*)malloc(i + count * (pidLen - varLen) + 1); 
 
   i = 0; 
   while (*arg){ 
@@ -425,4 +432,9 @@ char *expand(char *arg){
  * Usage of waitpid(): https://www.tutorialspoint.com/unix_system_calls/waitpid.htm
  * Usage of getline(): https://c-for-dummies.com/blog/?p=1112
  * Usage of strtok(): https://www.tutorialspoint.com/c_standard_library/c_function_strtok.htm 
+ * Usage of genenv("HOME"): https://www.tutorialspoint.com/c_standard_library/c_function_getenv.htm 
+ * 
+ * Background and foreground process in linux explanation: https://alligator.io/workflow/background-foreground-processes/
+ * 
+ * 
 */
